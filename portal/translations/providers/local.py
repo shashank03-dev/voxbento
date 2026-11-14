@@ -321,8 +321,9 @@ class LocalProvider(TranslationProvider, TranslationEngine):
             f"[NLLB] translate called: source='{source_lang_name}' -> target='{target_lang_name}' "
             f"model='{model}' text_len={len(text)}"
         )
-        # A room left on a model the operator no longer offers stops here.
-        if not settings.local_translation_allows(model):
+        # A room left on a model the operator no longer offers stops here. The live demo's model
+        # is the operator's own setting, so it works even when rooms are not offered it.
+        if not settings.local_translation_allows(model) and model != settings.live_demo_translation_model:
             logger.error("[NLLB] Model %r is not offered on this server (LOCAL_TRANSLATION_MODELS)", model)
             return None
         # NLLB is sequence-to-sequence and has no system-prompt channel, so persona and style

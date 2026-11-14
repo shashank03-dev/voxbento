@@ -155,6 +155,15 @@ async def test_an_offered_model_still_loads(offered):
 
 
 @pytest.mark.anyio
+async def test_the_live_demo_model_translates_when_rooms_are_not_offered_it(none_offered, monkeypatch):
+    """LIVE_DEMO_TRANSLATION_MODEL is the operator's own setting, so turning off built-in rooms keeps the demo."""
+    monkeypatch.setattr(settings, "live_demo_translation_model", OWN_BUILD)
+    with patch.object(local, "get_model_and_tokenizer", side_effect=RuntimeError("load attempted")) as load:
+        assert await _translate(OWN_BUILD) is None
+    load.assert_called_once_with(OWN_BUILD)
+
+
+@pytest.mark.anyio
 async def test_an_offered_model_that_is_not_downloaded_is_never_downloaded_by_a_room(offered, caplog):
     def cache_only(**kwargs):
         if kwargs.get("local_files_only"):

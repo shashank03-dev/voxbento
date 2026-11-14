@@ -699,6 +699,7 @@ async def test_warm_up_loads_what_is_not_in_memory_and_reports_it(monkeypatch):
     monkeypatch.setattr(live_demo, "translator_loaded", lambda name: f"nllb:{name}" in loaded)
     monkeypatch.setattr(live_demo.SupertonicTTSProvider, "engine_loaded", classmethod(lambda cls: "voice" in loaded))
     monkeypatch.setattr(live_demo, "_local_synthesize", fake_synthesize)
+    monkeypatch.setattr(live_demo, "get_download_progress", lambda name: {"status": "completed"})
     nllb = f"nllb:{settings.live_demo_translation_model}"
 
     assert not live_demo.models_ready(DEMO)
@@ -712,6 +713,28 @@ async def test_warm_up_loads_what_is_not_in_memory_and_reports_it(monkeypatch):
     await live_demo.warm_up(DEMO)
     assert loads[3:] == ["whisper:base", nllb, "voice"]
     assert live_demo.models_ready(DEMO)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("status", "downloads"), [({}, 1), ({"status": "completed"}, 0)])
+async def test_warm_up_downloads_the_translation_model_only_when_it_is_missing(monkeypatch, status, downloads):
+    """Rooms never download NLLB (#1191), but the demo's own model is the operator's choice and is fetched."""
+    order: list[str] = []
+    monkeypatch.setattr(live_demo, "models_ready", lambda demo: False)
+    monkeypatch.setattr(live_demo, "get_whisper_model", lambda name: None)
+    monkeypatch.setattr(live_demo, "get_download_progress", lambda name: status)
+    monkeypatch.setattr(live_demo, "trigger_download", lambda name: order.append(f"download:{name}"))
+    monkeypatch.setattr(live_demo, "get_model_and_tokenizer", lambda name: order.append(f"load:{name}"))
+
+    async def no_voice(text, language):
+        return b""
+
+    monkeypatch.setattr(live_demo, "_local_synthesize", no_voice)
+
+    await live_demo.warm_up(DEMO)
+
+    model = settings.live_demo_translation_model
+    assert order == [f"download:{model}"] * downloads + [f"load:{model}"]
 
 
 # ── Admin page ────────────────────────────────────────────────────────────────
