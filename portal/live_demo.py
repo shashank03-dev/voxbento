@@ -768,6 +768,8 @@ LOCAL_ENGINES = Engines(transcribe=_local_transcribe, translate=_local_translate
 
 
 _warm_lock = asyncio.Lock()
+# How often warm-up checks on a model download someone else started.
+_DOWNLOAD_POLL_SECONDS = 1.0
 
 
 def models_ready(demo: DemoSettings) -> bool:
@@ -801,6 +803,9 @@ async def warm_up(demo: DemoSettings) -> None:
         if get_download_progress(translation_model).get("status") != "completed":
             # Loading never downloads an NLLB model (#1191); the demo's model is the operator's own setting.
             await asyncio.to_thread(trigger_download, translation_model)
+        while get_download_progress(translation_model).get("status") == "downloading":
+            # An Admin's download from the Translation models page is still running.
+            await asyncio.sleep(_DOWNLOAD_POLL_SECONDS)
         await asyncio.to_thread(get_model_and_tokenizer, translation_model)
         if demo.voice:
             # A short synthesis loads the engine and the English voice style.

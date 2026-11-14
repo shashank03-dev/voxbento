@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import threading
 
 import numpy as np
 import pytest
@@ -735,6 +736,49 @@ async def test_warm_up_downloads_the_translation_model_only_when_it_is_missing(m
 
     model = settings.live_demo_translation_model
     assert order == [f"download:{model}"] * downloads + [f"load:{model}"]
+
+
+@pytest.mark.anyio
+async def test_warm_up_waits_for_a_download_an_admin_already_started(monkeypatch):
+    """Loading reads only local files, so loading mid-download would refuse the visitor."""
+    from portal.translations.providers import local
+
+    model = settings.live_demo_translation_model
+    started, release = threading.Event(), threading.Event()
+    done: list[str] = []
+
+    def slow_hub(**kwargs):
+        if kwargs.get("local_files_only"):
+            if not done:
+                raise local.LocalEntryNotFoundError("not in the cache")
+            return "/cache"
+        started.set()
+        release.wait(5)
+        done.append("downloaded")
+        return "/cache"
+
+    def load(name):
+        if not done:
+            raise local.LocalEntryNotFoundError("half downloaded")
+
+    monkeypatch.setattr("huggingface_hub.snapshot_download", slow_hub)
+    monkeypatch.setattr(local, "_download_progress", {})
+    monkeypatch.setattr(live_demo, "_DOWNLOAD_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(live_demo, "models_ready", lambda demo: False)
+    monkeypatch.setattr(live_demo, "get_whisper_model", lambda name: None)
+    monkeypatch.setattr(live_demo, "get_model_and_tokenizer", load)
+
+    async def no_voice(text, language):
+        return b""
+
+    monkeypatch.setattr(live_demo, "_local_synthesize", no_voice)
+
+    admin_download = asyncio.create_task(asyncio.to_thread(local.trigger_download, model))
+    await asyncio.to_thread(started.wait, 5)
+    asyncio.get_running_loop().call_later(0.1, release.set)
+    await live_demo.warm_up(DEMO)
+    await admin_download
+    assert done == ["downloaded"]
 
 
 # ── Admin page ────────────────────────────────────────────────────────────────
